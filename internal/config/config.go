@@ -90,6 +90,10 @@ type RepoConfig struct {
 	Agents         []types.AgentName `yaml:"-"`
 	Commands       Commands          `yaml:"commands"`
 	IgnorePatterns []string          `yaml:"ignore_patterns"`
+	// CITimeout is the repo-local ci_timeout override, parsed the same way as
+	// the global config's ci_timeout (see parseCITimeout). Zero means the repo
+	// did not set one; Merge falls back to the global value in that case.
+	CITimeout time.Duration `yaml:"-"`
 	// AllowRepoCommands opts in to honoring the code-executing selection
 	// fields (commands.{test,lint,format} and agent) from a contributor's
 	// pushed branch instead of the trusted default-branch copy. It is read
@@ -138,6 +142,7 @@ func (c *RepoConfig) UnmarshalYAML(value *yaml.Node) error {
 		Test                   TestRaw     `yaml:"test"`
 		Document               DocumentRaw `yaml:"document"`
 		DisableProjectSettings bool        `yaml:"disable_project_settings"`
+		CITimeout              string      `yaml:"ci_timeout"`
 	}
 	var raw repoConfigRaw
 	if err := value.Decode(&raw); err != nil {
@@ -153,6 +158,13 @@ func (c *RepoConfig) UnmarshalYAML(value *yaml.Node) error {
 	c.Test = raw.Test
 	c.Document = raw.Document
 	c.DisableProjectSettings = raw.DisableProjectSettings
+	if raw.CITimeout != "" {
+		d, err := parseCITimeout(raw.CITimeout)
+		if err != nil {
+			return err
+		}
+		c.CITimeout = d
+	}
 	return nil
 }
 
@@ -1132,6 +1144,12 @@ func Merge(global *GlobalConfig, repo *RepoConfig) *Config {
 		// repo is the EffectiveRepoConfig result, so this value is already
 		// trusted-only (EffectiveRepoConfig sourced it from the trusted copy).
 		DisableProjectSettings: repo.DisableProjectSettings,
+	}
+
+	// A repo-local ci_timeout overrides the global default. Zero means the
+	// repo didn't set one (see RepoConfig.CITimeout doc comment).
+	if repo.CITimeout != 0 {
+		cfg.CITimeout = repo.CITimeout
 	}
 
 	if repo.Agent != "" {

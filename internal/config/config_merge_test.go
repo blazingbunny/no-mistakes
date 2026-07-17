@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kunchenguid/no-mistakes/internal/types"
+	"gopkg.in/yaml.v3"
 )
 
 func TestMerge_GlobalOnly(t *testing.T) {
@@ -50,6 +51,65 @@ func TestMerge_RepoOverridesAgent(t *testing.T) {
 	}
 	if cfg.CITimeout != 4*time.Hour {
 		t.Errorf("ci_timeout = %v", cfg.CITimeout)
+	}
+}
+
+func TestMerge_RepoOverridesCITimeout(t *testing.T) {
+	// Regression test for a repo-local ci_timeout override being silently
+	// ignored: RepoConfig had no ci_timeout field at all, and Merge() only
+	// ever read CITimeout from global. See UnmarshalYAML's ci_timeout
+	// handling and the "repo-local ci_timeout overrides the global default"
+	// block in Merge for the fix.
+	global := &GlobalConfig{
+		Agent:     types.AgentClaude,
+		CITimeout: 168 * time.Hour,
+		LogLevel:  "info",
+	}
+	repo := &RepoConfig{
+		CITimeout: 2 * time.Minute,
+	}
+
+	cfg := Merge(global, repo)
+	if cfg.CITimeout != 2*time.Minute {
+		t.Errorf("ci_timeout = %v, want 2m (repo override)", cfg.CITimeout)
+	}
+}
+
+func TestMerge_RepoOverridesCITimeoutUnlimited(t *testing.T) {
+	global := &GlobalConfig{
+		Agent:     types.AgentClaude,
+		CITimeout: 4 * time.Hour,
+		LogLevel:  "info",
+	}
+	repo := &RepoConfig{
+		CITimeout: CITimeoutUnlimited,
+	}
+
+	cfg := Merge(global, repo)
+	if cfg.CITimeout != CITimeoutUnlimited {
+		t.Errorf("ci_timeout = %v, want CITimeoutUnlimited (repo override)", cfg.CITimeout)
+	}
+}
+
+func TestUnmarshalRepoConfig_CITimeout(t *testing.T) {
+	yamlSrc := "ci_timeout: \"2m\"\n"
+	var repo RepoConfig
+	if err := yaml.Unmarshal([]byte(yamlSrc), &repo); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if repo.CITimeout != 2*time.Minute {
+		t.Errorf("ci_timeout = %v, want 2m", repo.CITimeout)
+	}
+}
+
+func TestUnmarshalRepoConfig_CITimeoutUnset(t *testing.T) {
+	yamlSrc := "agent: claude\n"
+	var repo RepoConfig
+	if err := yaml.Unmarshal([]byte(yamlSrc), &repo); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if repo.CITimeout != 0 {
+		t.Errorf("ci_timeout = %v, want 0 (unset)", repo.CITimeout)
 	}
 }
 
